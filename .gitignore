@@ -1,2 +1,6 @@
 tracce_progetti.pdf
 tracce_progetti*
+server/server_forza4
+*.o
+__pycache__/
+*.pyc

@@ -1,0 +1,22 @@
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: connect4_server
+    ports:
+      - "5050:5050"
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    environment:
+      - SERVER_HOST=server
+      - SERVER_PORT=5050
+    stdin_open: true
+    tty: true
+    depends_on:
+      - server
+
