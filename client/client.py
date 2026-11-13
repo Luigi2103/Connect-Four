@@ -36,6 +36,8 @@ class ConnectFourClient:
 
         self.board = [[' ' for _ in range(COLS)] for _ in range(ROWS)]
         self.lock = threading.Lock() #mutex in python
+        self.auth_event = threading.Event()
+        self.authenticated = False
 
     def connect(self):
         try:
@@ -120,12 +122,20 @@ class ConnectFourClient:
         if cmd == "OK":
             msg = line[3:]
             print(f"\n{COLOR_GREEN}[SERVER]{COLOR_RESET} {msg}")
+            if self.state == "LOGIN":
+                print(f"{COLOR_CYAN}--- Stanze attualmente disponibili ---{COLOR_RESET}")
+                self.authenticated = True
+                self.state = "LOBBY"
+                self.auth_event.set()
 
         # Esempio: line = "ERR Colonna piena, riprova"
         # line[4:] salta "ERR " e prende solo "Colonna piena, riprova"
         elif cmd == "ERR":
             msg = line[4:]
             print(f"\n{COLOR_RED}[ERRORE]{COLOR_RESET} {msg}")
+            if self.state == "LOGIN":
+                self.authenticated = False
+                self.auth_event.set()
 
         # Esempio: line = "LOBBY_ROOM 1 WAITING Mario"
         # tokens: ['LOBBY_ROOM', '1', 'WAITING', 'Mario']
@@ -274,17 +284,31 @@ class ConnectFourClient:
         t = threading.Thread(target=self.receive_loop, daemon=True)
         t.start()
 
-        # Login
-        while self.running and self.state == "LOGIN":
-            name = input("Inserisci il tuo nickname: ").strip()
+        # Login con sincronizzazione su conferma del server
+        while self.running and not self.authenticated:
+            try:
+                name = input("Inserisci il tuo nickname: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                self.running = False
+                return
+
             if name:
+                if " " in name:
+                    print(f"{COLOR_RED}Il nickname non puo contenere spazi.{COLOR_RESET}")
+                    continue
+
+                self.auth_event.clear()
                 self.username = name
                 self.send_line(f"NICK {name}")
-                time.sleep(0.3)
-                if self.running:
-                    self.state = "LOBBY"
-                break
+                # Attende la risposta OK o ERR dal thread di ricezione
+                self.auth_event.wait(timeout=3.0)
+                if not self.running:
+                    return
+                if self.authenticated:
+                    break
 
+        # Piccola pausa per consentire la visualizzazione ordinata delle stanze iniziali
+        time.sleep(0.15)
         self.print_help()
 
         # Input loop principale
@@ -376,14 +400,15 @@ class ConnectFourClient:
             pass
 
     def print_help(self):
-        print(f"\n{COLOR_CYAN}{COLOR_BOLD}Comandi disponibili:{COLOR_RESET}")
-        print("  crea              -> Crea una nuova stanza di gioco")
-        print("  lista             -> Visualizza tutte le stanze e il loro stato")
-        print("  unisciti <id>     -> Richiedi di entrare in una stanza in attesa")
-        print("  accetta <id>      -> Accetta la richiesta di uno sfidante")
-        print("  rifiuta <id>      -> Rifiuta la richiesta di uno sfidante")
-        print("  esci              -> Chiudi la connessione ed esci")
-        print("  aiuto             -> Mostra questo messaggio\n")
+        with self.lock:
+            print(f"\n{COLOR_CYAN}{COLOR_BOLD}Comandi disponibili:{COLOR_RESET}")
+            print("  crea              -> Crea una nuova stanza di gioco")
+            print("  lista             -> Visualizza tutte le stanze e il loro stato")
+            print("  unisciti <id>     -> Richiedi di entrare in una stanza in attesa")
+            print("  accetta <id>      -> Accetta la richiesta di uno sfidante")
+            print("  rifiuta <id>      -> Rifiuta la richiesta di uno sfidante")
+            print("  esci              -> Chiudi la connessione ed esci")
+            print("  aiuto             -> Mostra questo messaggio\n")
 
 if __name__ == "__main__":
     host = os.environ.get("SERVER_HOST", "127.0.0.1")

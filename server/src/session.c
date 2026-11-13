@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include "session.h"
@@ -50,9 +51,9 @@ int client_register(int socket_fd, const char *username) {
     pthread_mutex_lock(&session_lock);
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i].socket_fd != -1 && strcmp(clients[i].username, username) == 0) {
+        if (clients[i].socket_fd != -1 && strcasecmp(clients[i].username, username) == 0) {
             pthread_mutex_unlock(&session_lock);
-            return -1; /* Username già in uso */
+            return -1; /* Username già in uso (case-insensitive) */
         }
     }
 
@@ -167,14 +168,6 @@ int room_create(int owner_fd) {
         }
     }
 
-    /* Verifica che il client non sia già proprietario di un'altra stanza in attesa */
-    for (int i = 0; i < MAX_ROOMS; i++) {
-        if (rooms[i].id != -1 && (rooms[i].owner_fd == owner_fd || rooms[i].guest_fd == owner_fd)) {
-            pthread_mutex_unlock(&session_lock);
-            return -2; /* Client ha già creato o partecipa a una stanza */
-        }
-    }
-
     int free_slot = -1;
     for (int i = 0; i < MAX_ROOMS; i++) {
         if (rooms[i].id == -1) {
@@ -239,18 +232,18 @@ int room_request_join(int room_id, int guest_fd) {
         }
     }
 
-    /* Verifica se il guest è già proprietario di una stanza in attesa */
-    for (int i = 0; i < MAX_ROOMS; i++) {
-        if (rooms[i].id != -1 && rooms[i].owner_fd == guest_fd) {
-            pthread_mutex_unlock(&session_lock);
-            return -8; /* È già proprietario di una stanza creata */
-        }
-    }
-
     GameRoom *r = room_find_by_id(room_id);
     if (!r) {
         pthread_mutex_unlock(&session_lock);
         return -2; /* Stanza non trovata */
+    }
+
+    /* Verifica se il creatore della stanza sta attualmente giocando un'altra partita */
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i].socket_fd == r->owner_fd && clients[i].active_room_id != -1) {
+            pthread_mutex_unlock(&session_lock);
+            return -8; /* Il proprietario è impegnato in gioco attivo */
+        }
     }
 
     if (r->state != STATE_WAITING) {

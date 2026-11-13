@@ -33,8 +33,8 @@ static int handle_auth(int client_fd, const char *line, int *authenticated, char
     }
 
     const char *nick = line + 5;
-    if (strlen(nick) == 0 || strlen(nick) >= MAX_NAME_LEN) {
-        send_msg(client_fd, "ERR Nickname non valido\n");
+    if (strlen(nick) == 0 || strlen(nick) >= MAX_NAME_LEN || strchr(nick, ' ') != NULL) {
+        send_msg(client_fd, "ERR Nickname non valido (non puo contenere spazi)\n");
         return 0;
     }
 
@@ -99,7 +99,7 @@ static void handle_join(int client_fd, const char *args) {
     } else if (res == -7) {
         send_msg(client_fd, "ERR Hai gia una richiesta di sfida in attesa di risposta\n");
     } else if (res == -8) {
-        send_msg(client_fd, "ERR Hai gia creato una stanza in attesa. Attendi sfidanti prima di unirti ad altre stanze\n");
+        send_msg(client_fd, "ERR Il creatore della stanza e attualmente impegnato in un'altra partita\n");
     } else {
         send_msg(client_fd, "ERR Errore durante la richiesta di join\n");
     }
@@ -202,8 +202,16 @@ static void handle_move(int client_fd, const char *args) {
 
 static void handle_rematch(int client_fd, const char *args) {
     int rid = -1;
-    char choice[8] = {0};
-    if (sscanf(args, "%d %s", &rid, choice) != 2) return;
+    char choice[16] = {0};
+    if (sscanf(args, "%d %15s", &rid, choice) != 2) {
+        send_msg(client_fd, "ERR Formato rematch non valido. Uso: REMATCH <id> YES|NO\n");
+        return;
+    }
+
+    if (strcasecmp(choice, "YES") != 0 && strcasecmp(choice, "NO") != 0) {
+        send_msg(client_fd, "ERR Scelta rematch non valida. Uso: REMATCH <id> YES|NO\n");
+        return;
+    }
 
     int vote_yes = (strcasecmp(choice, "YES") == 0);
     int new_session_ready = 0;
