@@ -4,3 +4,10 @@ server/server_forza4
 *.o
 __pycache__/
 *.pyc
+logo_unina.png
+Documentazione.tex
+logo_app.png
+*.aux
+*.log
+*.out
+*.toc

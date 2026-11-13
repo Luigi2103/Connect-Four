@@ -170,7 +170,7 @@ def test_concurrent_moves_turn_enforcement():
     def p2_move():
         barrier.wait()
         p2.send(f"MOVE {rid} 2")
-        resp = p2.read_until(["BOARD_UPDATE", "ERR"], timeout=3.0)
+        resp = p2.read_until("ERR", timeout=3.0)
         p2_res.append(resp)
 
     t1 = threading.Thread(target=p1_move)

@@ -10,11 +10,13 @@
 #include "game.h"
 #include "protocol.h"
 
+//funzione che manda il messaggio al client
 static void send_msg(int fd, const char *msg) {
     if (fd <= 0) return;
     send(fd, msg, strlen(msg), 0);
 }
 
+//funzione per essere compliant con il protocollo
 static void trim_crlf(char *str) {
     int len = strlen(str);
     while (len > 0 && (str[len - 1] == '\r' || str[len - 1] == '\n' || str[len - 1] == ' ')) {
@@ -23,7 +25,7 @@ static void trim_crlf(char *str) {
     }
 }
 
-/* Gestione autenticazione iniziale */
+//handler per autenticazione
 static int handle_auth(int client_fd, const char *line, int *authenticated, char *username) {
     if (strncmp(line, "NICK ", 5) != 0) {
         send_msg(client_fd, "ERR Autenticazione richiesta con: NICK <nome>\n");
@@ -94,6 +96,10 @@ static void handle_join(int client_fd, const char *args) {
         send_msg(client_fd, "ERR Non puoi unirti alla tua stessa stanza\n");
     } else if (res == -5) {
         send_msg(client_fd, "ERR Un altro giocatore ha gia una richiesta in attesa\n");
+    } else if (res == -7) {
+        send_msg(client_fd, "ERR Hai gia una richiesta di sfida in attesa di risposta\n");
+    } else if (res == -8) {
+        send_msg(client_fd, "ERR Hai gia creato una stanza in attesa. Attendi sfidanti prima di unirti ad altre stanze\n");
     } else {
         send_msg(client_fd, "ERR Errore durante la richiesta di join\n");
     }
@@ -101,7 +107,10 @@ static void handle_join(int client_fd, const char *args) {
 
 static void handle_accept(int client_fd, const char *args) {
     int rid = atoi(args);
-    if (room_accept_join(rid, client_fd) != 0) {
+    int res = room_accept_join(rid, client_fd);
+    if (res == -3) {
+        send_msg(client_fd, "ERR Lo sfidante e gia impegnato in un'altra partita o non e piu disponibile\n");
+    } else if (res != 0) {
         send_msg(client_fd, "ERR Impossibile accettare la richiesta\n");
     } else {
         printf("[PARTITA] Stanza #%d: Richiesta accettata, partita avviata!\n", rid);
@@ -124,7 +133,7 @@ static void handle_move(int client_fd, const char *args) {
         return;
     }
 
-    col -= 1; /* Conversione da indice 1-7 a 0-6 */
+    col -= 1; //Conversione da indice 1-7 a 0-6
     int row = -1, game_over = 0, winner_fd = -1;
     char board_str[BOARD_ROWS * BOARD_COLS + 1] = {0};
     int owner_fd = -1, guest_fd = -1, next_turn_fd = -1;
@@ -219,7 +228,7 @@ static void handle_leave(int client_fd, const char *args) {
     send_msg(client_fd, "OK Sei uscito dalla stanza.\n");
 }
 
-/* Dispatcher dei comandi autenticati */
+
 static int dispatch_command(int client_fd, const char *line) {
     if (strcmp(line, "CREATE") == 0) {
         handle_create(client_fd);
@@ -250,17 +259,16 @@ void* client_thread(void *arg) {
     int client_fd = *((int*)arg);
     free(arg);
 
-    char recv_buf[BUFFER_SIZE];
-    char line_buf[BUFFER_SIZE];
-    int line_len = 0;
-    int authenticated = 0;
-    char username[MAX_NAME_LEN] = {0};
+    char recv_buf[BUFFER_SIZE]; //buffer dei messaggi
+    char line_buf[BUFFER_SIZE]; //serve a ricostruire la riga
+    int line_len = 0;           //tiene traccia della posizione dove inserire il nuovo carattere
+    int authenticated = 0;      // flag per il login
+    int running = 1;
+    char username[MAX_NAME_LEN] = {0}; //username utente
 
-    while (1) {
+    while (running) {
         ssize_t bytes_read = recv(client_fd, recv_buf, sizeof(recv_buf) - 1, 0);
-        if (bytes_read <= 0) {
-            break;
-        }
+        if (bytes_read <= 0) { break; }
         recv_buf[bytes_read] = '\0';
 
         for (ssize_t i = 0; i < bytes_read; i++) {
@@ -272,12 +280,13 @@ void* client_thread(void *arg) {
                 if (line_len > 0) {
                     if (!authenticated) {
                         if (handle_auth(client_fd, line_buf, &authenticated, username) < 0) {
-                            close(client_fd);
-                            return NULL;
+                            running = 0;
+                            break;
                         }
                     } else {
                         if (dispatch_command(client_fd, line_buf) < 0) {
-                            goto disconnect;
+                            running = 0;
+                            break;
                         }
                     }
                 }
@@ -290,7 +299,6 @@ void* client_thread(void *arg) {
         }
     }
 
-disconnect:
     if (authenticated) {
         printf("[DISCONNESSIONE] Client '%s' (fd: %d) disconnesso.\n", username, client_fd);
         fflush(stdout);

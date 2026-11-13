@@ -35,12 +35,12 @@ class ConnectFourClient:
         self.state = "LOGIN"  # LOGIN, LOBBY, WAITING_APPROVAL, IN_GAME, GAME_OVER
 
         self.board = [[' ' for _ in range(COLS)] for _ in range(ROWS)]
-        self.lock = threading.Lock()
+        self.lock = threading.Lock() #mutex in python
 
     def connect(self):
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((self.host, self.port))
+            self.sock.connect((self.host, self.port)) #esegue il 3WH 
             return True
         except Exception as e:
             print(f"{COLOR_RED}[ERRORE] Connessione al server {self.host}:{self.port} fallita: {e}{COLOR_RESET}")
@@ -115,38 +115,58 @@ class ConnectFourClient:
         tokens = line.split()
         cmd = tokens[0]
 
+        # Esempio: line = "OK Stanza 1 creata con successo"
+        # line[3:] salta "OK " e prende solo "Stanza 1 creata con successo"
         if cmd == "OK":
             msg = line[3:]
             print(f"\n{COLOR_GREEN}[SERVER]{COLOR_RESET} {msg}")
 
+        # Esempio: line = "ERR Colonna piena, riprova"
+        # line[4:] salta "ERR " e prende solo "Colonna piena, riprova"
         elif cmd == "ERR":
             msg = line[4:]
             print(f"\n{COLOR_RED}[ERRORE]{COLOR_RESET} {msg}")
 
+        # Esempio: line = "LOBBY_ROOM 1 WAITING Mario"
+        # tokens: ['LOBBY_ROOM', '1', 'WAITING', 'Mario']
         elif cmd == "LOBBY_ROOM":
             if len(tokens) >= 4:
                 rid, status, owner = tokens[1], tokens[2], tokens[3]
                 print(f"  Stanza #{rid:<3} | Stato: {status:<11} | Creatore: {owner}")
 
+        # Esempio: line = "ROOM_CREATED 3"
+        # tokens: ['ROOM_CREATED', '3'] -> l'id assegnato alla stanza appena creata
         elif cmd == "ROOM_CREATED":
             self.current_room_id = int(tokens[1])
             print(f"\n{COLOR_GREEN}[STANZA]{COLOR_RESET} Stanza #{self.current_room_id} creata. In attesa di avversari...")
 
+        # Esempio: line = "ROOM_NOTIF 1 PLAYING Luigi"
+        # Notifica broadcast per chi è in lobby: la stanza 1 è passata a stato PLAYING
         elif cmd == "ROOM_NOTIF":
             if len(tokens) >= 4 and self.state == "LOBBY":
                 rid, st, own = tokens[1], tokens[2], tokens[3]
                 print(f"\n{COLOR_GRAY}[INFO LOBBY] Stanza #{rid} ({own}) -> {st}{COLOR_RESET}")
 
+        # Esempio: line = "JOIN_REQUEST 1 Andrea"
+        # Un altro giocatore (Andrea) chiede al proprietario di entrare nella stanza 1
         elif cmd == "JOIN_REQUEST":
             rid = tokens[1]
             applicant = tokens[2]
             print(f"\n{COLOR_YELLOW}{COLOR_BOLD}[RICHIESTA SFIDA]{COLOR_RESET} Il giocatore '{applicant}' vuole entrare nella tua stanza #{rid}!")
             print(f"Per decidere digita: {COLOR_BOLD}accetta {rid}{COLOR_RESET} oppure {COLOR_BOLD}rifiuta {rid}{COLOR_RESET}")
 
+        # Esempio: line = "JOIN_REJECTED 1"
+        # Il proprietario della stanza 1 ha rifiutato la nostra richiesta di ingresso
         elif cmd == "JOIN_REJECTED":
             print(f"\n{COLOR_RED}[RIFIUTO]{COLOR_RESET} La richiesta per la stanza #{tokens[1]} e stata respinta dal proprietario.")
             self.state = "LOBBY"
 
+        # Esempio: line = "GAME_START 1 Andrea X 1"
+        # tokens: ['GAME_START', '1', 'Andrea', 'X', '1']
+        # tokens[1] = id stanza ('1')
+        # tokens[2] = nome avversario ('Andrea')
+        # tokens[3] = mio simbolo assegnato ('X')
+        # tokens[4] = turno iniziale: '1' significa tocca a me, '0' tocca all'avversario
         elif cmd == "GAME_START":
             self.current_room_id = int(tokens[1])
             self.opponent_name = tokens[2]
@@ -162,6 +182,10 @@ class ConnectFourClient:
             else:
                 print(f"{COLOR_GRAY}In attesa della prima mossa di {self.opponent_name}...{COLOR_RESET}")
 
+        # Esempio: line = "BOARD_UPDATE 4 MOVE X ...........................X................"
+        # tokens[1] = colonna giocata ('4')
+        # tokens[3] = chi ha giocato ('X')
+        # tokens[4] = stringa di 42 caratteri che rappresenta l'intera scacchiera
         elif cmd == "BOARD_UPDATE":
             if len(tokens) >= 5:
                 col = tokens[1]
@@ -170,14 +194,21 @@ class ConnectFourClient:
                 self.parse_board_string(board_str)
                 self.render_board()
 
+        # Esempio: line = "YOUR_TURN"
+        # Il server ci avvisa che l'avversario ha finito: tocca a noi fare una mossa
         elif cmd == "YOUR_TURN":
             self.is_my_turn = True
             print(f"\n{COLOR_YELLOW}{COLOR_BOLD}>> E il tuo turno! Scegli una colonna (1-7):{COLOR_RESET} ", end="", flush=True)
 
+        # Esempio: line = "WAIT_TURN"
+        # Il server ci avvisa che la nostra mossa e andata a buon fine: ora tocca attendere l'avversario
         elif cmd == "WAIT_TURN":
             self.is_my_turn = False
             print(f"{COLOR_GRAY}Turno avversario in corso...{COLOR_RESET}")
 
+        # Esempio: line = "GAME_OVER WIN Complimenti, hai vinto!"
+        # tokens[1] = esito ('WIN', 'LOSE', 'DRAW')
+        # tokens[2:] = testo del messaggio (es. "Complimenti, hai vinto!")
         elif cmd == "GAME_OVER":
             outcome = tokens[1]
             msg = " ".join(tokens[2:])
@@ -198,11 +229,15 @@ class ConnectFourClient:
                 self.state = "GAME_OVER"
                 print(f"\n{COLOR_YELLOW}{COLOR_BOLD}⚖️ {msg}{COLOR_RESET}")
 
+        # Esempio: line = "REMATCH_OFFER Vuoi fare la rivincita?"
+        # line[14:] salta "REMATCH_OFFER " e prende la domanda
         elif cmd == "REMATCH_OFFER":
             msg = line[14:]
             print(f"\n{COLOR_CYAN}{COLOR_BOLD}[OPZIONE NUOVA SESSIONE]{COLOR_RESET} {msg}")
             print(f"Rispondi con: {COLOR_BOLD}rematch si{COLOR_RESET} o {COLOR_BOLD}rematch no{COLOR_RESET}")
 
+        # Esempio: line = "REMATCH_OK Rivincita rifiutata. Stanza chiusa."
+        # line[11:] salta "REMATCH_OK " e prende la spiegazione
         elif cmd == "REMATCH_OK":
             msg = line[11:]
             print(f"\n{COLOR_GREEN}[SESSIONE]{COLOR_RESET} {msg}")
@@ -213,6 +248,8 @@ class ConnectFourClient:
             self.is_my_turn = False
             print(f"{COLOR_CYAN}[LOBBY] In attesa di nuovi sfidanti...\n> {COLOR_RESET}", end="", flush=True)
 
+        # Esempio: line = "OPPONENT_DISCONNECTED"
+        # Il socket dell'avversario e caduto, la partita viene interrotta d'ufficio
         elif cmd == "OPPONENT_DISCONNECTED":
             print(f"\n{COLOR_RED}[AVVISO] L'avversario si e disconnesso. La partita e terminata.{COLOR_RESET}")
             self.state = "LOBBY"
@@ -222,6 +259,8 @@ class ConnectFourClient:
             self.is_my_turn = False
             print(f"{COLOR_CYAN}[LOBBY] Sei tornato nella lobby.\n> {COLOR_RESET}", end="", flush=True)
 
+        # Esempio: line = "BYE"
+        # Risposta finale del server prima di chiudere la socket a seguito di QUIT
         elif cmd == "BYE":
             self.running = False
 
@@ -273,17 +312,23 @@ class ConnectFourClient:
 
                 elif self.state == "GAME_OVER":
                     if action == "rematch":
-                        if len(parts) >= 2 and parts[1].lower() in ["si", "yes", "s"]:
-                            self.send_line(f"REMATCH {self.current_room_id} YES")
+                        if len(parts) >= 2:
+                            choice = parts[1].lower()
+                            if choice in ["si", "yes", "s"]:
+                                self.send_line(f"REMATCH {self.current_room_id} YES")
+                            elif choice in ["no", "n"]:
+                                self.send_line(f"REMATCH {self.current_room_id} NO")
+                                self.state = "LOBBY"
+                                self.current_room_id = -1
+                                self.my_symbol = None
+                                self.opponent_name = ""
+                                self.is_my_turn = False
+                                print(f"\n{COLOR_CYAN}{COLOR_BOLD}[LOBBY]{COLOR_RESET} Sei tornato nella lobby.")
+                                print(f"Digita {COLOR_BOLD}'lista'{COLOR_RESET} o {COLOR_BOLD}'crea'{COLOR_RESET}.\n> ", end="", flush=True)
+                            else:
+                                print(f"{COLOR_RED}Scelta non valida. Digita 'rematch si' oppure 'rematch no'.{COLOR_RESET}")
                         else:
-                            self.send_line(f"REMATCH {self.current_room_id} NO")
-                            self.state = "LOBBY"
-                            self.current_room_id = -1
-                            self.my_symbol = None
-                            self.opponent_name = ""
-                            self.is_my_turn = False
-                            print(f"\n{COLOR_CYAN}{COLOR_BOLD}[LOBBY]{COLOR_RESET} Sei tornato nella lobby.")
-                            print(f"Digita {COLOR_BOLD}'lista'{COLOR_RESET} o {COLOR_BOLD}'crea'{COLOR_RESET}.\n> ", end="", flush=True)
+                            print(f"{COLOR_RED}Uso: rematch si oppure rematch no.{COLOR_RESET}")
                     else:
                         print("Digita 'rematch si' o 'rematch no'.")
 

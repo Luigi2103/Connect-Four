@@ -11,6 +11,27 @@ static GameRoom rooms[MAX_ROOMS];
 static pthread_mutex_t session_lock;
 static int next_room_id = 1;
 
+static void room_init_slot(GameRoom *r, int id, GameState state, int owner_fd, const char *owner_name) {
+    r->id = id;
+    r->state = state;
+    r->owner_fd = owner_fd;
+    if (owner_name) {
+        strncpy(r->owner_name, owner_name, MAX_NAME_LEN - 1);
+        r->owner_name[MAX_NAME_LEN - 1] = '\0';
+    } else {
+        r->owner_name[0] = '\0';
+    }
+    r->guest_fd = -1;
+    r->guest_name[0] = '\0';
+    r->pending_fd = -1;
+    r->pending_name[0] = '\0';
+    r->current_turn_fd = -1;
+    r->winner_fd = -1;
+    r->rematch_owner_vote = 0;
+    r->rematch_guest_vote = 0;
+    game_init(r->board);
+}
+
 void sessions_init(void) {
     pthread_mutex_init(&session_lock, NULL);
 
@@ -21,17 +42,7 @@ void sessions_init(void) {
     }
 
     for (int i = 0; i < MAX_ROOMS; i++) {
-        rooms[i].id = -1;
-        rooms[i].state = STATE_CREATED;
-        rooms[i].owner_fd = -1;
-        rooms[i].guest_fd = -1;
-        rooms[i].pending_fd = -1;
-        rooms[i].owner_name[0] = '\0';
-        rooms[i].guest_name[0] = '\0';
-        rooms[i].pending_name[0] = '\0';
-        rooms[i].winner_fd = -1;
-        rooms[i].rematch_owner_vote = 0;
-        rooms[i].rematch_guest_vote = 0;
+        room_init_slot(&rooms[i], -1, STATE_CREATED, -1, NULL);
     }
 }
 
@@ -152,7 +163,15 @@ int room_create(int owner_fd) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].socket_fd == owner_fd && clients[i].active_room_id != -1) {
             pthread_mutex_unlock(&session_lock);
-            return -2;
+            return -2; /* Client già impegnato in un'altra partita */
+        }
+    }
+
+    /* Verifica che il client non sia già proprietario di un'altra stanza in attesa */
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id != -1 && (rooms[i].owner_fd == owner_fd || rooms[i].guest_fd == owner_fd)) {
+            pthread_mutex_unlock(&session_lock);
+            return -2; /* Client ha già creato o partecipa a una stanza */
         }
     }
 
@@ -166,29 +185,17 @@ int room_create(int owner_fd) {
 
     if (free_slot == -1) {
         pthread_mutex_unlock(&session_lock);
-        return -1; /* Limite stanze raggiunto */
+        return -1; /* Limite massimo stanze raggiunto */
     }
 
     ConnectedClient *cli = client_find_by_fd(owner_fd);
     if (!cli) {
         pthread_mutex_unlock(&session_lock);
-        return -3;
+        return -3; /* Client creatore non trovato */
     }
 
     GameRoom *r = &rooms[free_slot];
-    r->id = next_room_id++;
-    r->state = STATE_WAITING;
-    r->owner_fd = owner_fd;
-    strncpy(r->owner_name, cli->username, MAX_NAME_LEN - 1);
-    r->owner_name[MAX_NAME_LEN - 1] = '\0';
-    r->guest_fd = -1;
-    r->guest_name[0] = '\0';
-    r->pending_fd = -1;
-    r->pending_name[0] = '\0';
-    r->winner_fd = -1;
-    r->rematch_owner_vote = 0;
-    r->rematch_guest_vote = 0;
-    game_init(r->board);
+    room_init_slot(r, next_room_id++, STATE_WAITING, owner_fd, cli->username);
 
     int created_id = r->id;
     char owner_nick[MAX_NAME_LEN];
@@ -224,6 +231,22 @@ int room_request_join(int room_id, int guest_fd) {
         }
     }
 
+    /* Verifica se il guest ha già una richiesta pendente in un'altra stanza */
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id != -1 && rooms[i].pending_fd == guest_fd) {
+            pthread_mutex_unlock(&session_lock);
+            return -7; /* Ha già una richiesta di sfida in attesa */
+        }
+    }
+
+    /* Verifica se il guest è già proprietario di una stanza in attesa */
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id != -1 && rooms[i].owner_fd == guest_fd) {
+            pthread_mutex_unlock(&session_lock);
+            return -8; /* È già proprietario di una stanza creata */
+        }
+    }
+
     GameRoom *r = room_find_by_id(room_id);
     if (!r) {
         pthread_mutex_unlock(&session_lock);
@@ -248,7 +271,7 @@ int room_request_join(int room_id, int guest_fd) {
     ConnectedClient *cli = client_find_by_fd(guest_fd);
     if (!cli) {
         pthread_mutex_unlock(&session_lock);
-        return -6;
+        return -6; /* Client sfidante non trovato */
     }
 
     r->pending_fd = guest_fd;
@@ -275,18 +298,45 @@ int room_accept_join(int room_id, int owner_fd) {
     GameRoom *r = room_find_by_id(room_id);
     if (!r || r->owner_fd != owner_fd) {
         pthread_mutex_unlock(&session_lock);
-        return -1;
+        return -1; /* Stanza inesistente o chiamante non è il proprietario */
     }
 
     if (r->pending_fd == -1) {
         pthread_mutex_unlock(&session_lock);
-        return -2; /* Nessuna richiesta pendente */
+        return -2; /* Nessuna richiesta di sfida pendente */
+    }
+
+    /* Verifica che lo sfidante sia ancora libero in lobby */
+    int guest_still_free = 0;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i].socket_fd == r->pending_fd) {
+            if (clients[i].active_room_id == -1) {
+                guest_still_free = 1;
+            }
+            break;
+        }
+    }
+
+    if (!guest_still_free) {
+        /* Lo sfidante è già entrato in un'altra partita o si è disconnesso */
+        r->pending_fd = -1;
+        r->pending_name[0] = '\0';
+        pthread_mutex_unlock(&session_lock);
+        return -3; /* Sfidante non più disponibile */
     }
 
     r->guest_fd = r->pending_fd;
     strncpy(r->guest_name, r->pending_name, MAX_NAME_LEN);
     r->pending_fd = -1;
     r->pending_name[0] = '\0';
+
+    /* Cancella eventuali altre richieste pendenti dello stesso giocatore */
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id != -1 && rooms[i].id != room_id && rooms[i].pending_fd == r->guest_fd) {
+            rooms[i].pending_fd = -1;
+            rooms[i].pending_name[0] = '\0';
+        }
+    }
 
     /* Avvio della partita */
     r->state = STATE_IN_PROGRESS;
@@ -330,12 +380,12 @@ int room_reject_join(int room_id, int owner_fd) {
     GameRoom *r = room_find_by_id(room_id);
     if (!r || r->owner_fd != owner_fd) {
         pthread_mutex_unlock(&session_lock);
-        return -1;
+        return -1; /* Stanza inesistente o chiamante non è il proprietario */
     }
 
     if (r->pending_fd == -1) {
         pthread_mutex_unlock(&session_lock);
-        return -2;
+        return -2; /* Nessuna richiesta di sfida da rifiutare */
     }
 
     int rejected_fd = r->pending_fd;
@@ -358,7 +408,7 @@ int room_make_move(int room_id, int player_fd, int col, int *out_row, int *out_g
     GameRoom *r = room_find_by_id(room_id);
     if (!r || r->state != STATE_IN_PROGRESS) {
         pthread_mutex_unlock(&session_lock);
-        return -1;
+        return -1; /* Stanza inesistente o non in partita */
     }
 
     if (r->current_turn_fd != player_fd) {
@@ -419,13 +469,10 @@ int room_handle_rematch(int room_id, int player_fd, int vote_yes, int *out_new_s
     GameRoom *r = room_find_by_id(room_id);
     if (!r || r->state != STATE_FINISHED) {
         pthread_mutex_unlock(&session_lock);
-        return -1;
+        return -1; /* Stanza inesistente o partita non ancora conclusa */
     }
 
-    /* Caso Vittoria: opzionale da traccia
-       "il vincitore di una partita può decidere di creare una nuova sessione,
-        diventando automaticamente il nuovo proprietario della partita se non lo era già.
-        Il perdente, invece, è obbligato a lasciare la partita." */
+    /* Caso Vittoria: il vincitore può aprire una nuova sessione da proprietario; il perdente esce */
     if (r->winner_fd != -1) {
         if (player_fd == r->winner_fd) {
             if (vote_yes) {
@@ -444,15 +491,7 @@ int room_handle_rematch(int room_id, int player_fd, int vote_yes, int *out_new_s
                     }
                 }
 
-                r->guest_fd = -1;
-                r->guest_name[0] = '\0';
-                r->pending_fd = -1;
-                r->pending_name[0] = '\0';
-                r->winner_fd = -1;
-                r->rematch_owner_vote = 0;
-                r->rematch_guest_vote = 0;
-                r->state = STATE_WAITING;
-                game_init(r->board);
+                room_init_slot(r, r->id, STATE_WAITING, r->owner_fd, r->owner_name);
 
                 *out_new_session_ready = 1;
                 pthread_mutex_unlock(&session_lock);
@@ -474,24 +513,14 @@ int room_handle_rematch(int room_id, int player_fd, int vote_yes, int *out_new_s
         return 0;
     }
 
-    /* Caso Pareggio: opzionale da traccia
-       "Nel caso in cui la partita termini in pareggio, entrambi i giocatori
-        hanno la possibilità di scegliere congiuntamente se effettuare una nuova partita.
-        la partita torna nello stato di attesa e il server invita nuovamente gli altri giocatori a partecipare." */
+    /* Caso Pareggio: entrambi i giocatori votano se riaprire la stanza per una nuova partita */
     if (r->winner_fd == -1) {
         if (player_fd == r->owner_fd) r->rematch_owner_vote = vote_yes ? 1 : -1;
         if (player_fd == r->guest_fd) r->rematch_guest_vote = vote_yes ? 1 : -1;
 
         if (r->rematch_owner_vote == 1 && r->rematch_guest_vote == 1) {
             /* Entrambi hanno concordato: nuova sessione in attesa */
-            r->guest_fd = -1;
-            r->guest_name[0] = '\0';
-            r->pending_fd = -1;
-            r->pending_name[0] = '\0';
-            r->rematch_owner_vote = 0;
-            r->rematch_guest_vote = 0;
-            r->state = STATE_WAITING;
-            game_init(r->board);
+            room_init_slot(r, r->id, STATE_WAITING, r->owner_fd, r->owner_name);
             if (out_owner_fd) *out_owner_fd = r->owner_fd;
 
             *out_new_session_ready = 1;
@@ -522,6 +551,10 @@ void room_close(int room_id) {
         return;
     }
 
+    int owner_fd = r->owner_fd;
+    int guest_fd = r->guest_fd;
+    int was_in_progress = (r->state == STATE_IN_PROGRESS);
+
     /* Reset stato attivo per entrambi i client */
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].socket_fd == r->owner_fd || clients[i].socket_fd == r->guest_fd) {
@@ -531,13 +564,15 @@ void room_close(int room_id) {
         }
     }
 
-    r->id = -1;
-    r->state = STATE_CREATED;
-    r->owner_fd = -1;
-    r->guest_fd = -1;
-    r->pending_fd = -1;
+    room_init_slot(r, -1, STATE_CREATED, -1, NULL);
 
     pthread_mutex_unlock(&session_lock);
+
+    /* Se la partita era in corso, notifica entrambi i partecipanti per sicurezza */
+    if (was_in_progress) {
+        if (owner_fd != -1) send_raw(owner_fd, "OPPONENT_DISCONNECTED\n");
+        if (guest_fd != -1) send_raw(guest_fd, "OPPONENT_DISCONNECTED\n");
+    }
 
     char notif[BUFFER_SIZE];
     snprintf(notif, sizeof(notif), "ROOM_NOTIF %d CHIUSA Nessuno\n", room_id);
@@ -545,38 +580,24 @@ void room_close(int room_id) {
 }
 
 void room_handle_disconnect(int socket_fd) {
+    int notify_other_fds[MAX_ROOMS];
+    int closed_rids[MAX_ROOMS];
+    int count = 0;
+
     pthread_mutex_lock(&session_lock);
 
     for (int i = 0; i < MAX_ROOMS; i++) {
         if (rooms[i].id != -1) {
             if (rooms[i].owner_fd == socket_fd) {
-                int other_fd = rooms[i].guest_fd;
-                int rid = rooms[i].id;
+                notify_other_fds[count] = rooms[i].guest_fd;
+                closed_rids[count] = rooms[i].id;
                 rooms[i].id = -1;
-                pthread_mutex_unlock(&session_lock);
-
-                if (other_fd != -1) {
-                    send_raw(other_fd, "OPPONENT_DISCONNECTED\n");
-                    client_set_active_room(other_fd, -1);
-                }
-                char notif[BUFFER_SIZE];
-                snprintf(notif, sizeof(notif), "ROOM_NOTIF %d CHIUSA Nessuno\n", rid);
-                broadcast_lobby(notif, -1);
-                return;
+                count++;
             } else if (rooms[i].guest_fd == socket_fd) {
-                int other_fd = rooms[i].owner_fd;
-                int rid = rooms[i].id;
+                notify_other_fds[count] = rooms[i].owner_fd;
+                closed_rids[count] = rooms[i].id;
                 rooms[i].id = -1;
-                pthread_mutex_unlock(&session_lock);
-
-                if (other_fd != -1) {
-                    send_raw(other_fd, "OPPONENT_DISCONNECTED\n");
-                    client_set_active_room(other_fd, -1);
-                }
-                char notif[BUFFER_SIZE];
-                snprintf(notif, sizeof(notif), "ROOM_NOTIF %d CHIUSA Nessuno\n", rid);
-                broadcast_lobby(notif, -1);
-                return;
+                count++;
             } else if (rooms[i].pending_fd == socket_fd) {
                 rooms[i].pending_fd = -1;
                 rooms[i].pending_name[0] = '\0';
@@ -585,5 +606,16 @@ void room_handle_disconnect(int socket_fd) {
     }
 
     pthread_mutex_unlock(&session_lock);
+
+    /* Notifica i giocatori rimasti e la lobby per ogni stanza chiusa */
+    for (int i = 0; i < count; i++) {
+        if (notify_other_fds[i] != -1) {
+            send_raw(notify_other_fds[i], "OPPONENT_DISCONNECTED\n");
+            client_set_active_room(notify_other_fds[i], -1);
+        }
+        char notif[BUFFER_SIZE];
+        snprintf(notif, sizeof(notif), "ROOM_NOTIF %d CHIUSA Nessuno\n", closed_rids[i]);
+        broadcast_lobby(notif, -1);
+    }
 }
 

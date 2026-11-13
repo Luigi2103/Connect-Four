@@ -41,7 +41,7 @@ Connect-Four/
 
 ## Requisiti
 
-- **Docker** e **Docker Compose** (raccomandati per l'esame da 8 CFU)
+- **Docker** e **Docker Compose** (raccomandati)
 *oppure*
 - Sistema operativo Linux / WSL / macOS con:
   - `gcc` (supporto standard C99 e flag `-pthread`)
@@ -114,7 +114,7 @@ Una volta effettuato l'accesso con il proprio nickname, il client consente di in
 - Durante il proprio turno, digitare un numero da **`1` a `7`** per inserire la pedina nella colonna corrispondente.
 - `abbandona`: abbandona la partita in corso comunicando la chiusura della sessione all'avversario.
 
-### Gestione Fine Partita e Requisito Opzionale
+### Gestione Fine Partita e Rivincita
 - Al termine della partita (vittoria o pareggio), il server notifica l'esito ai due giocatori e aggiorna lo stato per gli altri utenti in lobby.
 - **In caso di vittoria**: il vincitore può scegliere se avviare una nuova sessione (`rematch si`), diventando il proprietario della stanza che torna in stato di attesa per nuovi sfidanti; il perdente viene ricondotto in lobby.
 - **In caso di pareggio**: entrambi i giocatori possono concordare congiuntamente l'avvio di una nuova sessione (`rematch si`).

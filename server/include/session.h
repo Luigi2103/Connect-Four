@@ -30,7 +30,7 @@ typedef struct {
     int current_turn_fd;
     int winner_fd; /* -1 = nessuno/pareggio */
 
-    /* Flag per la gestione del rematch / opzionale */
+    /* Flag per la gestione della rivincita */
     int rematch_owner_vote;
     int rematch_guest_vote;
 } GameRoom;

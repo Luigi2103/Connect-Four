@@ -216,13 +216,11 @@ def run_server_process():
     os.system(cmd)
 
 def open_terminal(title, args_str):
-    # Calcola il percorso base del progetto in modo dinamico e agnostico rispetto all'OS o al percorso
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     py_exec = sys.executable
 
     if os.name == 'nt':
-        # Su Windows usa Start-Process di PowerShell specificando WorkingDirectory con apici singoli.
-        # Questo gestisce nativamente e in modo sicuro qualsiasi spazio nel percorso (es. cartelle con spazi nel nome)
+        # Su Windows usa apici singoli su WorkingDirectory per supportare spazi nei percorsi
         ps_cmd = (
             f"Start-Process powershell -WorkingDirectory '{base_dir}' "
             f"-ArgumentList '-NoExit', '-Command', '& \"{py_exec}\" test/simulate_game.py {args_str}'"
