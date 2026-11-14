@@ -428,12 +428,10 @@ int room_make_move(int room_id, int player_fd, int col, int *out_row, int *out_g
         *out_winner_fd = player_fd;
         *out_next_turn_fd = -1;
 
-        /* Il perdente deve lasciare subito la partita e tornare libero in lobby */
-        int loser_fd = (player_fd == r->owner_fd) ? r->guest_fd : r->owner_fd;
+        /* La partita e conclusa: entrambi i giocatori non sono piu in gioco attivo */
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i].socket_fd == loser_fd) {
+            if (clients[i].socket_fd == r->owner_fd || clients[i].socket_fd == r->guest_fd) {
                 clients[i].active_room_id = -1;
-                break;
             }
         }
     } else if (game_is_full(r->board)) {
@@ -442,6 +440,13 @@ int room_make_move(int room_id, int player_fd, int col, int *out_row, int *out_g
         *out_game_over = 2; /* Pareggio */
         *out_winner_fd = -1;
         *out_next_turn_fd = -1;
+
+        /* Partita conclusa in parita: entrambi i giocatori non sono piu in gioco attivo */
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (clients[i].socket_fd == r->owner_fd || clients[i].socket_fd == r->guest_fd) {
+                clients[i].active_room_id = -1;
+            }
+        }
     } else {
         /* Alterna il turno */
         r->current_turn_fd = (player_fd == r->owner_fd) ? r->guest_fd : r->owner_fd;
@@ -482,10 +487,10 @@ int room_handle_rematch(int room_id, int player_fd, int vote_yes, int *out_owner
                 }
 
                 int loser_fd = (r->winner_fd == r->owner_fd) ? r->guest_fd : r->owner_fd;
+                /* Reset active_room_id per entrambi: la stanza torna in attesa e nessuno sta giocando attivamente */
                 for (int i = 0; i < MAX_CLIENTS; i++) {
-                    if (clients[i].socket_fd == loser_fd) {
+                    if (clients[i].socket_fd == r->owner_fd || clients[i].socket_fd == loser_fd) {
                         clients[i].active_room_id = -1;
-                        break;
                     }
                 }
 
@@ -537,11 +542,10 @@ int room_handle_rematch(int room_id, int player_fd, int vote_yes, int *out_owner
             /* Entrambi hanno concordato: nuova sessione in attesa con owner originario */
             room_init_slot(r, r->id, STATE_WAITING, r->owner_fd, r->owner_name);
 
-            /* Il guest torna libero in lobby */
+            /* Reset active_room_id per entrambi: la stanza torna in attesa e nessuno sta giocando attivamente */
             for (int i = 0; i < MAX_CLIENTS; i++) {
-                if (clients[i].socket_fd == orig_guest_fd) {
+                if (clients[i].socket_fd == orig_owner_fd || clients[i].socket_fd == orig_guest_fd) {
                     clients[i].active_room_id = -1;
-                    break;
                 }
             }
 

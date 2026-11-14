@@ -154,6 +154,58 @@ def test_case_insensitive_nicknames():
     c2.close()
     print("  -> SUPERATO: Nickname univoco garantito indipendentemente dal maiuscolo/minuscolo.")
 
+def test_winner_rematch_allows_new_challengers():
+    print("\n[TEST EDGE 5] Riapertura stanza del vincitore e accoglienza nuovi sfidanti...")
+    p1, _ = connect_client("Champ")
+    p2, _ = connect_client("Challenger")
+
+    p1.send("CREATE")
+    rid = int(p1.read_until("ROOM_CREATED").split()[1])
+
+    p2.send(f"JOIN {rid}")
+    p2.read_until("OK")
+
+    p1.read_until("JOIN_REQUEST")
+    p1.send(f"ACCEPT {rid}")
+
+    p1.read_until("GAME_START")
+    p2.read_until("GAME_START")
+
+    # P1 vince in verticale (colonna 1: P1 1, P2 2, P1 1, P2 2, P1 1, P2 2, P1 1)
+    moves = [1, 2, 1, 2, 1, 2, 1]
+    for i, col in enumerate(moves):
+        active = p1 if (i % 2 == 0) else p2
+        passive = p2 if (i % 2 == 0) else p1
+        active.send(f"MOVE {rid} {col}")
+        active.read_until("BOARD_UPDATE")
+        passive.read_until("BOARD_UPDATE")
+
+    p1.read_until("GAME_OVER WIN")
+    p2.read_until("GAME_OVER LOSE")
+
+    p1.read_until("REMATCH_OFFER")
+    # P1 accetta di aprire una nuova sessione da proprietario
+    p1.send(f"REMATCH {rid} YES")
+    p1_rematch_resp = p1.read_until("REMATCH_OK")
+    print(f"  Risposta a Champ su REMATCH YES: {p1_rematch_resp}")
+    assert p1_rematch_resp.startswith("REMATCH_OK")
+
+    # P2 è uscito, ora un terzo client P3 tenta di sfidare Champ nella nuova sessione riaperta
+    p3, _ = connect_client("NewPlayer")
+    p3.send(f"JOIN {rid}")
+    p3_join_resp = p3.read_until(["OK", "ERR"])
+    print(f"  Risposta a NewPlayer su JOIN: {p3_join_resp}")
+
+    assert p3_join_resp.startswith("OK"), f"NewPlayer doveva poter entrare ma ha ricevuto: {p3_join_resp}"
+    req_at_p1 = p1.read_until("JOIN_REQUEST")
+    print(f"  Notifica a Champ: {req_at_p1}")
+    assert "JOIN_REQUEST" in req_at_p1
+
+    p1.close()
+    p2.close()
+    p3.close()
+    print("  -> SUPERATO: Il vincitore accoglie regolarmente nuovi sfidanti nella stanza riaperta.")
+
 if __name__ == "__main__":
     print("=" * 60)
     print("      SUITE DI TEST CASI LIMITE ED EDGE CASES - FORZA 4     ")
@@ -163,6 +215,7 @@ if __name__ == "__main__":
         test_reject_join_feedback()
         test_voluntary_leave_in_game()
         test_case_insensitive_nicknames()
+        test_winner_rematch_allows_new_challengers()
         print("\n" + "=" * 60)
         print("   TUTTI I TEST SUI CASI LIMITE HANNO AVUTO ESITO POSITIVO!   ")
         print("=" * 60)
