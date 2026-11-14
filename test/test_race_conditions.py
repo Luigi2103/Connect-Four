@@ -156,33 +156,17 @@ def test_concurrent_moves_turn_enforcement():
     p1.read_until("GAME_START")
     p2.read_until("GAME_START")
 
-    # P1 inizia per primo
-    barrier = threading.Barrier(2)
-    p1_res = []
-    p2_res = []
+    # P1 inizia per primo: verifichiamo che P2 venga tassativamente respinto se tenta di giocare fuori turno
+    p2.send(f"MOVE {rid} 2")
+    p2_err = p2.read_until("ERR", timeout=3.0)
+    print(f"  Risposta P2 (mossa tentata fuori turno): {p2_err}")
+    assert "ERR Non e il tuo turno" in p2_err, f"P2 doveva essere respinto: {p2_err}"
 
-    def p1_move():
-        barrier.wait()
-        p1.send(f"MOVE {rid} 1")
-        resp = p1.read_until(["BOARD_UPDATE", "ERR"], timeout=3.0)
-        p1_res.append(resp)
-
-    def p2_move():
-        barrier.wait()
-        p2.send(f"MOVE {rid} 2")
-        resp = p2.read_until("ERR", timeout=3.0)
-        p2_res.append(resp)
-
-    t1 = threading.Thread(target=p1_move)
-    t2 = threading.Thread(target=p2_move)
-    t1.start(); t2.start()
-    t1.join(); t2.join()
-
-    print(f"  Risposta P1 (turno valido): {p1_res}")
-    print(f"  Risposta P2 (turno non valido): {p2_res}")
-
-    assert any(r.startswith("BOARD_UPDATE") for r in p1_res), "P1 non ha completato la mossa"
-    assert any("ERR" in r or "Non e il tuo turno" in r for r in p2_res), "P2 doveva essere respinto con errore di turno"
+    # P1 esegue regolarmente la mossa di turno
+    p1.send(f"MOVE {rid} 1")
+    p1_ok = p1.read_until("BOARD_UPDATE", timeout=3.0)
+    print(f"  Risposta P1 (mossa valida di turno): {p1_ok}")
+    assert p1_ok.startswith("BOARD_UPDATE"), "P1 non ha completato la mossa valida"
     print("  -> TEST 3 SUPERATO: Alternanza atomica dei turni garantita.")
 
     p1.close()

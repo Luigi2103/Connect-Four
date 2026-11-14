@@ -127,6 +127,14 @@ class ConnectFourClient:
                 self.authenticated = True
                 self.state = "LOBBY"
                 self.auth_event.set()
+            elif self.state == "GAME_OVER":
+                if "lobby" in msg.lower() or "conclusa" in msg.lower() or "rifiutato" in msg.lower() or "accordo" in msg.lower():
+                    self.state = "LOBBY"
+                    self.current_room_id = -1
+                    self.my_symbol = None
+                    self.opponent_name = ""
+                    self.is_my_turn = False
+                    print(f"{COLOR_CYAN}[LOBBY] Sei tornato nella lobby.\n> {COLOR_RESET}", end="", flush=True)
 
         # Esempio: line = "ERR Colonna piena, riprova"
         # line[4:] salta "ERR " e prende solo "Colonna piena, riprova"
@@ -323,20 +331,39 @@ class ConnectFourClient:
 
                 if self.state == "IN_GAME":
                     if action.isdigit():
+                        if len(parts) > 1:
+                            print(f"{COLOR_RED}Inserisci un solo numero da 1 a 7.{COLOR_RESET}")
+                            continue
                         col = int(action)
                         if 1 <= col <= 7:
                             self.send_line(f"MOVE {self.current_room_id} {col}")
                         else:
                             print(f"{COLOR_RED}Colonna non valida. Scegli tra 1 e 7.{COLOR_RESET}")
-                    elif action == "abbandona" or action == "leave":
+                    elif action in ("abbandona", "leave"):
+                        if len(parts) > 1:
+                            print(f"{COLOR_RED}Il comando 'abbandona' non accetta parametri.{COLOR_RESET}")
+                            continue
                         self.send_line(f"LEAVE {self.current_room_id}")
                         self.state = "LOBBY"
+                        self.current_room_id = -1
+                        self.my_symbol = None
+                        self.opponent_name = ""
+                        self.is_my_turn = False
+                        print(f"\n{COLOR_CYAN}[LOBBY]{COLOR_RESET} Hai abbandonato la partita e sei tornato nella lobby.\n> ", end="", flush=True)
                     else:
                         print(f"{COLOR_GRAY}Inserisci il numero della colonna (1-7) o 'abbandona'.{COLOR_RESET}")
 
                 elif self.state == "GAME_OVER":
-                    if action == "rematch":
-                        if len(parts) >= 2:
+                    if action in ["esci", "quit"]:
+                        if len(parts) > 1:
+                            print(f"{COLOR_RED}Il comando 'esci' non accetta parametri.{COLOR_RESET}")
+                            continue
+                        self.send_line(f"REMATCH {self.current_room_id} NO")
+                        self.send_line("QUIT")
+                        self.running = False
+                        break
+                    elif action == "rematch":
+                        if len(parts) == 2:
                             choice = parts[1].lower()
                             if choice in ["si", "yes", "s"]:
                                 self.send_line(f"REMATCH {self.current_room_id} YES")
@@ -354,37 +381,54 @@ class ConnectFourClient:
                         else:
                             print(f"{COLOR_RED}Uso: rematch si oppure rematch no.{COLOR_RESET}")
                     else:
-                        print("Digita 'rematch si' o 'rematch no'.")
+                        print("Digita 'rematch si', 'rematch no' o 'esci'.")
 
                 else:
-                    # Comandi Lobby
-                    if action == "crea" or action == "create":
-                        self.send_line("CREATE")
-                    elif action == "lista" or action == "list":
-                        print(f"\n{COLOR_CYAN}--- Stanze disponibili sul server ---{COLOR_RESET}")
-                        self.send_line("LIST")
-                    elif action == "unisciti" or action == "join":
-                        if len(parts) >= 2 and parts[1].isdigit():
+                    # Comandi Lobby con validazione rigorosa dei parametri
+                    if action in ("crea", "create"):
+                        if len(parts) > 1:
+                            print(f"{COLOR_RED}Il comando 'crea' non accetta parametri. Digita solo 'crea'.{COLOR_RESET}")
+                        else:
+                            self.send_line("CREATE")
+                    elif action in ("lista", "list"):
+                        if len(parts) > 1:
+                            print(f"{COLOR_RED}Il comando 'lista' non accetta parametri. Digita solo 'lista'.{COLOR_RESET}")
+                        else:
+                            print(f"\n{COLOR_CYAN}--- Stanze disponibili sul server ---{COLOR_RESET}")
+                            self.send_line("LIST")
+                    elif action in ("unisciti", "join"):
+                        if len(parts) == 2 and parts[1].isdigit():
                             rid = parts[1]
                             self.send_line(f"JOIN {rid}")
                         else:
                             print(f"{COLOR_RED}Uso: unisciti <id_stanza>{COLOR_RESET}")
-                    elif action == "accetta" or action == "accept":
-                        if len(parts) >= 2 and parts[1].isdigit():
+                    elif action in ("accetta", "accept"):
+                        if len(parts) == 2 and parts[1].isdigit():
                             self.send_line(f"ACCEPT {parts[1]}")
                         else:
                             print(f"{COLOR_RED}Uso: accetta <id_stanza>{COLOR_RESET}")
-                    elif action == "rifiuta" or action == "reject":
-                        if len(parts) >= 2 and parts[1].isdigit():
+                    elif action in ("rifiuta", "reject"):
+                        if len(parts) == 2 and parts[1].isdigit():
                             self.send_line(f"REJECT {parts[1]}")
                         else:
                             print(f"{COLOR_RED}Uso: rifiuta <id_stanza>{COLOR_RESET}")
-                    elif action == "esci" or action == "quit":
-                        self.send_line("QUIT")
-                        self.running = False
-                        break
-                    elif action == "aiuto" or action == "help":
-                        self.print_help()
+                    elif action in ["chiudi", "close"]:
+                        if len(parts) == 2 and parts[1].isdigit():
+                            self.send_line(f"LEAVE {parts[1]}")
+                        else:
+                            print(f"{COLOR_RED}Uso: chiudi <id_stanza>{COLOR_RESET}")
+                    elif action in ("esci", "quit"):
+                        if len(parts) > 1:
+                            print(f"{COLOR_RED}Il comando 'esci' non accetta parametri. Digita solo 'esci'.{COLOR_RESET}")
+                        else:
+                            self.send_line("QUIT")
+                            self.running = False
+                            break
+                    elif action in ("aiuto", "help"):
+                        if len(parts) > 1:
+                            print(f"{COLOR_RED}Il comando 'aiuto' non accetta parametri. Digita solo 'aiuto'.{COLOR_RESET}")
+                        else:
+                            self.print_help()
                     else:
                         print(f"{COLOR_GRAY}Comando sconosciuto. Digita 'aiuto' per visualizzare i comandi.{COLOR_RESET}")
 
@@ -407,6 +451,7 @@ class ConnectFourClient:
             print("  unisciti <id>     -> Richiedi di entrare in una stanza in attesa")
             print("  accetta <id>      -> Accetta la richiesta di uno sfidante")
             print("  rifiuta <id>      -> Rifiuta la richiesta di uno sfidante")
+            print("  chiudi <id>       -> Chiudi una stanza creata da te")
             print("  esci              -> Chiudi la connessione ed esci")
             print("  aiuto             -> Mostra questo messaggio\n")
 

@@ -53,7 +53,8 @@ int room_accept_join(int room_id, int owner_fd);
 int room_reject_join(int room_id, int owner_fd);
 int room_make_move(int room_id, int player_fd, int col, int *out_row, int *out_game_over, 
                    int *out_winner_fd, char *out_board_str, int *out_owner_fd, int *out_guest_fd, int *out_next_turn_fd);
-int room_handle_rematch(int room_id, int player_fd, int vote_yes, int *out_new_session_ready, int *out_owner_fd);
+int room_handle_rematch(int room_id, int player_fd, int vote_yes, int *out_owner_fd, int *out_guest_fd);
+int room_leave(int room_id, int client_fd);
 void room_close(int room_id);
 void room_handle_disconnect(int socket_fd);
 

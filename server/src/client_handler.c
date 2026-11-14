@@ -122,6 +122,8 @@ static void handle_reject(int client_fd, const char *args) {
     int rid = atoi(args);
     if (room_reject_join(rid, client_fd) != 0) {
         send_msg(client_fd, "ERR Impossibile rifiutare la richiesta\n");
+    } else {
+        send_msg(client_fd, "OK Richiesta rifiutata\n");
     }
 }
 
@@ -214,9 +216,9 @@ static void handle_rematch(int client_fd, const char *args) {
     }
 
     int vote_yes = (strcasecmp(choice, "YES") == 0);
-    int new_session_ready = 0;
     int owner_fd = -1;
-    int res = room_handle_rematch(rid, client_fd, vote_yes, &new_session_ready, &owner_fd);
+    int guest_fd = -1;
+    int res = room_handle_rematch(rid, client_fd, vote_yes, &owner_fd, &guest_fd);
 
     if (res == 1) {
         send_msg(client_fd, "REMATCH_OK Sei il proprietario della nuova sessione in attesa di sfidanti.\n");
@@ -224,16 +226,36 @@ static void handle_rematch(int client_fd, const char *args) {
         if (owner_fd != -1) {
             send_msg(owner_fd, "REMATCH_OK Accordo raggiunto. Nuova sessione in attesa aperta.\n");
         }
-    } else if (!vote_yes) {
+        if (guest_fd != -1) {
+            send_msg(guest_fd, "OK Accordo raggiunto. La stanza e stata riaperta dal proprietario. Sei tornato in lobby.\n");
+        }
+    } else if (res == 3) {
         send_msg(client_fd, "OK Sessione conclusa.\n");
-        client_set_active_room(client_fd, -1);
+        int other_fd = (client_fd == owner_fd) ? guest_fd : owner_fd;
+        if (other_fd != -1) {
+            send_msg(other_fd, "OK L'avversario ha rifiutato la nuova partita. Sei tornato nella lobby.\n");
+        }
+    } else if (res == 4) {
+        send_msg(client_fd, "OK Sessione conclusa.\n");
+    } else if (res == 5) {
+        send_msg(client_fd, "OK Voto registrato. In attesa della decisione dell'avversario...\n");
+    } else {
+        send_msg(client_fd, "ERR Impossibile gestire la richiesta di rematch\n");
     }
 }
 
 static void handle_leave(int client_fd, const char *args) {
     int rid = atoi(args);
-    room_close(rid);
-    send_msg(client_fd, "OK Sei uscito dalla stanza.\n");
+    int res = room_leave(rid, client_fd);
+    if (res == -1) {
+        send_msg(client_fd, "ERR Stanza non trovata\n");
+    } else if (res == -2) {
+        send_msg(client_fd, "ERR Non puoi chiudere la stanza se non sei il proprietario\n");
+    } else if (res == -3) {
+        send_msg(client_fd, "ERR Non fai parte di questa stanza\n");
+    } else {
+        send_msg(client_fd, "OK Sei uscito dalla stanza.\n");
+    }
 }
 
 

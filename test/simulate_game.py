@@ -188,12 +188,45 @@ def run_simulated_player(role, scenario_key, move_delay=0.7):
                         print(f"\n{COLOR_GREEN}{COLOR_BOLD}🏆 RISULTATO: {msg}{COLOR_RESET}")
                     elif outcome == "LOSE":
                         print(f"\n{COLOR_RED}{COLOR_BOLD}❌ RISULTATO: {msg}{COLOR_RESET}")
+                        print(f"{COLOR_GRAY}(Il giocatore sconfitto lascia la partita e torna in lobby come da specifica){COLOR_RESET}")
+                        print(f"\n{COLOR_GREEN}--- Simulazione completata con successo! Premi INVIO per chiudere. ---{COLOR_RESET}")
+                        input()
+                        return
                     else:
                         print(f"\n{COLOR_YELLOW}{COLOR_BOLD}⚖️ RISULTATO: {msg}{COLOR_RESET}")
-                    
-                    print(f"\n{COLOR_CYAN}--- Simulazione completata con successo! Premi INVIO per chiudere. ---{COLOR_RESET}")
-                    input()
-                    return
+
+                elif cmd == "REMATCH_OFFER":
+                    offer_msg = line[14:]
+                    print(f"\n{COLOR_CYAN}{COLOR_BOLD}[OFFERTA DAL SERVER]{COLOR_RESET} {offer_msg}")
+
+                    if scenario_key == "pareggio":
+                        if role == "p1":
+                            print(f"\n{COLOR_YELLOW}{COLOR_BOLD}--- TEST AUTOMATICO GESTIONE RIVINCITA ---{COLOR_RESET}")
+                            time.sleep(1.0)
+                            print(f"{COLOR_YELLOW}[TEST 1 - SINTASSI ERRATA] P1 invia: REMATCH {room_id} ERRORE{COLOR_RESET}")
+                            send(f"REMATCH {room_id} ERRORE")
+                        elif role == "p2":
+                            print(f"\n{COLOR_YELLOW}{COLOR_BOLD}--- TEST AUTOMATICO GESTIONE RIVINCITA ---{COLOR_RESET}")
+                            time.sleep(3.2) # Attende che P1 testi l'errore e voti YES
+                            print(f"{COLOR_YELLOW}[TEST 3 - RIFIUTO RIVINCITA] P2 invia: REMATCH {room_id} NO{COLOR_RESET}")
+                            send(f"REMATCH {room_id} NO")
+                    else:
+                        print(f"\n{COLOR_GREEN}--- Simulazione completata con successo! Premi INVIO per chiudere. ---{COLOR_RESET}")
+                        input()
+                        return
+
+                elif cmd == "ERR" and "rematch" in line.lower():
+                    print(f"{COLOR_RED}[SERVER - ERRORE CATTURATO] {line}{COLOR_RESET}")
+                    time.sleep(1.0)
+                    print(f"{COLOR_YELLOW}[TEST 2 - VOTO FAVOREVOLE] P1 invia: REMATCH {room_id} YES{COLOR_RESET}")
+                    send(f"REMATCH {room_id} YES")
+
+                elif cmd == "OK" and any(k in line.lower() for k in ("voto", "conclusa", "rifiutato", "lobby")):
+                    print(f"{COLOR_GREEN}[SERVER] {line}{COLOR_RESET}")
+                    if any(k in line.lower() for k in ("conclusa", "rifiutato")):
+                        print(f"\n{COLOR_GREEN}--- Simulazione e test rivincita completati! Premi INVIO per chiudere. ---{COLOR_RESET}")
+                        input()
+                        return
 
         except Exception as e:
             print(f"Errore client: {e}")
@@ -300,7 +333,7 @@ class BufferedSocket:
         except:
             pass
 
-def test_single_scenario_headless(scen_key):
+def test_single_scenario_visual(scen_key):
     scen = SCENARIOS[scen_key]
     moves = scen["moves"]
 
@@ -312,8 +345,8 @@ def test_single_scenario_headless(scen_key):
     p1 = BufferedSocket(raw1)
     p2 = BufferedSocket(raw2)
 
-    p1.send("NICK Headless_P1")
-    p2.send("NICK Headless_P2")
+    p1.send("NICK Test_P1")
+    p2.send("NICK Test_P2")
     p1.read_until("OK")
     p2.read_until("OK")
 
@@ -331,13 +364,17 @@ def test_single_scenario_headless(scen_key):
     p2.read_until("GAME_START")
 
     final_outcome = None
+    last_board_str = ""
     for i, col in enumerate(moves):
         active = p1 if (i % 2 == 0) else p2
         passive = p2 if (i % 2 == 0) else p1
 
         active.send(f"MOVE {rid} {col}")
-        active.read_until("BOARD_UPDATE")
-        passive.read_until("BOARD_UPDATE")
+        up1 = active.read_until("BOARD_UPDATE")
+        up2 = passive.read_until("BOARD_UPDATE")
+
+        if len(up1.split()) >= 5:
+            last_board_str = up1.split()[4]
 
         l1 = active.read_until(["GAME_OVER", "WAIT_TURN", "YOUR_TURN"])
         l2 = passive.read_until(["GAME_OVER", "WAIT_TURN", "YOUR_TURN"])
@@ -348,6 +385,38 @@ def test_single_scenario_headless(scen_key):
         elif l2.startswith("GAME_OVER"):
             final_outcome = l2.split()[1]
             break
+
+    # Stampa visiva della scacchiera finale
+    if last_board_str:
+        render_board(last_board_str)
+
+    # In caso di pareggio, esegui e mostra la gestione della rivincita (errore, si, no)
+    if scen_key == "pareggio" and final_outcome == "DRAW":
+        p1.read_until("REMATCH_OFFER")
+        p2.read_until("REMATCH_OFFER")
+
+        print(f"\n{COLOR_CYAN}{COLOR_BOLD}--- DIMOSTRAZIONE PROTOCOLLO RIVINCITA ---{COLOR_RESET}")
+
+        # 1. Test scelta non valida
+        p1.send(f"REMATCH {rid} ERRORE")
+        err_resp = p1.read_until(["ERR", "OK"])
+        print(f"  {COLOR_YELLOW}[1. TEST SINTASSI ERRATA]{COLOR_RESET} P1 invia: 'REMATCH {rid} ERRORE'")
+        print(f"     -> Risposta Server: {COLOR_RED}{err_resp}{COLOR_RESET} (Errore catturato!)")
+
+        # 2. Test voto favorevole (SI)
+        p1.send(f"REMATCH {rid} YES")
+        ok_p1 = p1.read_until(["ERR", "OK"])
+        print(f"  {COLOR_YELLOW}[2. TEST VOTO FAVOREVOLE]{COLOR_RESET} P1 invia: 'REMATCH {rid} YES'")
+        print(f"     -> Risposta Server: {COLOR_GREEN}{ok_p1}{COLOR_RESET}")
+
+        # 3. Test rifiuto (NO) da parte del secondo giocatore
+        p2.send(f"REMATCH {rid} NO")
+        ok_p2 = p2.read_until(["ERR", "OK"])
+        notif_p1 = p1.read_until(["ERR", "OK"])
+        print(f"  {COLOR_YELLOW}[3. TEST RIFIUTO RIVINCITA]{COLOR_RESET} P2 invia: 'REMATCH {rid} NO'")
+        print(f"     -> Risposta a P2: {COLOR_GREEN}{ok_p2}{COLOR_RESET}")
+        print(f"     -> Notifica a P1: {COLOR_CYAN}{notif_p1}{COLOR_RESET}")
+        print(f"     -> {COLOR_GREEN}Stanza deallocata e sessione chiusa regolarmente.{COLOR_RESET}")
 
     p1.close()
     p2.close()
@@ -360,14 +429,16 @@ def run_test_all():
     
     results = {}
     for key, info in SCENARIOS.items():
-        print(f"\nEsecuzione test: {COLOR_BOLD}{info['title']}{COLOR_RESET}...")
-        outcome = test_single_scenario_headless(key)
+        print(f"\n{COLOR_CYAN}================================================================={COLOR_RESET}")
+        print(f"Esecuzione test: {COLOR_BOLD}{info['title']}{COLOR_RESET}")
+        print(f"{COLOR_GRAY}Descrizione: {info['description']}{COLOR_RESET}")
+        outcome = test_single_scenario_visual(key)
         expected = info["expected"]
         passed = (outcome == expected)
         results[key] = (passed, outcome, expected)
         
         status_str = f"{COLOR_GREEN}SUPERATO (Esito: {outcome}){COLOR_RESET}" if passed else f"{COLOR_RED}FALLITO (Ottenuto: {outcome}, Atteso: {expected}){COLOR_RESET}"
-        print(f"-> {status_str}")
+        print(f"-> Esito verifica: {status_str}")
 
     print("\n" + "=" * 65)
     print("RIEPILOGO FINALE DEI TEST:")
