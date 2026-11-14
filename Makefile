@@ -1,9 +1,15 @@
-.PHONY: all server clean docker-up docker-down test
+.PHONY: all server clean tsan asan docker-up docker-down test
 
 all: server
 
 server:
 	$(MAKE) -C server
+
+tsan:
+	$(MAKE) -C server tsan
+
+asan:
+	$(MAKE) -C server asan
 
 clean:
 	$(MAKE) -C server clean

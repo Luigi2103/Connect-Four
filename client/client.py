@@ -384,7 +384,7 @@ class ConnectFourClient:
                         print("Digita 'rematch si', 'rematch no' o 'esci'.")
 
                 else:
-                    # Comandi Lobby con validazione rigorosa dei parametri
+                    # Comandi Lobby con validazione dei parametri
                     if action in ("crea", "create"):
                         if len(parts) > 1:
                             print(f"{COLOR_RED}Il comando 'crea' non accetta parametri. Digita solo 'crea'.{COLOR_RESET}")

@@ -8,10 +8,13 @@ all: $(TARGET)
 $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) $(SRC) -o $(TARGET)
 
-tsan: CFLAGS += -fsanitize=thread -g
-tsan: $(TARGET)
+tsan: clean
+	$(CC) $(CFLAGS) -fsanitize=thread -g $(SRC) -o $(TARGET)
+
+asan: clean
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -g $(SRC) -o $(TARGET)
 
 clean:
 	rm -f $(TARGET)
 
-.PHONY: all clean tsan
+.PHONY: all clean tsan asan

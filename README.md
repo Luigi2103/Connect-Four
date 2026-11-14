@@ -48,6 +48,8 @@ Connect-Four/
   - `make`
   - `python3` (versione 3.8 o superiore)
 
+> **Nota per macOS e Linux**: su macOS e su molte distribuzioni Linux, il comando `python` potrebbe non essere presente nel PATH di default. Se riscontri l'errore `command not found: python`, utilizza **`python3`** (ad esempio: `python3 client/client.py` o `python3 test/test_race_conditions.py`).
+
 ---
 
 ## Esecuzione con Docker-compose
@@ -107,6 +109,7 @@ Una volta effettuato l'accesso con il proprio nickname, il client consente di in
 - `unisciti <id>`: invia una richiesta di partecipazione alla stanza specificata.
 - `accetta <id>`: (riservato al creatore della stanza) accetta la richiesta dello sfidante e avvia la partita.
 - `rifiuta <id>`: (riservato al creatore della stanza) rifiuta la richiesta dello sfidante.
+- `chiudi <id>`: (riservato al creatore della stanza) annulla e chiude una stanza creata in precedenza.
 - `esci`: chiude la connessione con il server.
 - `aiuto`: riepiloga i comandi disponibili.
 
@@ -121,26 +124,45 @@ Una volta effettuato l'accesso con il proprio nickname, il client consente di in
 
 ---
 
-## Test di Concorrenza e Race Condition
+## Test di Concorrenza, Race Condition e Casi Limite
 
-Nella cartella `test/` è disponibile una suite automatizzata per verificare la robustezza della sincronizzazione e l'assenza di race condition:
+Nella cartella `test/` sono disponibili suite automatizzate per verificare la robustezza della sincronizzazione, la gestione della memoria e l'assenza di race condition:
 
+### 1. Test di Concorrenza e Stress Test
 ```bash
-# Avviare prima il server (in locale o via Docker)
-# Poi eseguire i test:
 python test/test_race_conditions.py
+# (Su macOS/Linux usare python3 se 'python' non è presente)
 ```
-
 Lo script esegue quattro scenari ad alta concorrenza utilizzando barriere di sincronizzazione (`threading.Barrier`):
-1. **Creazione concorrente di stanze**: 15 client richiedono la creazione di stanze nello stesso millisecondo; verifica che non vi siano ID duplicati o corruzioni nell'array delle stanze.
+1. **Creazione concorrente di stanze**: 15 client richiedono la creazione di stanze nello stesso millisecondo; verifica l'univocità progressiva degli ID e l'integrità del mutex.
 2. **Join simultaneo sulla stessa stanza**: 10 client tentano di unirsi simultaneamente alla medesima stanza; il lock serializza le richieste ammettendone solo una e respingendo le altre.
 3. **Turn Enforcement**: invio concorrente di mosse tra i due giocatori; verifica che il giocatore fuori turno venga bloccato e lo stato di gioco rimanga consistente.
 4. **Stress test disconnessioni**: 25 client si connettono, inviano comandi e si disconnettono bruscamente per testare la pulizia delle risorse e l'assenza di crash o deadlock.
 
-Per un controllo approfondito a livello di memoria, il server può essere compilato con **ThreadSanitizer** (TSan):
-
+### 2. Test Casi Limite ed Edge Cases
 ```bash
-cd server && make clean && make tsan
+python test/test_edge_cases.py
+```
+Verifica:
+- **Controllo autorizzativo anti-tampering**: impedisce a utenti non autorizzati di chiudere stanze altrui.
+- **Feedback bidirezionale**: verifica che il creatore riceva conferma del rifiuto e lo sfidante riceva la notifica.
+- **Abbandono volontario asimmetrico**: verifica che l'avversario riceva la notifica di disconnessione e chi abbandona riceva la conferma di uscita.
+- **Univocità nickname case-insensitive**: garantisce che nickname con maiuscole/minuscole diverse (es. `Luigi` e `LUIGI`) vengano correttamente rilevati come duplicati.
+
+### 3. Dimostrazione Visuale Affiancata (Split-Screen)
+```bash
+python test/demo_live_visuale.py
+```
+Simula sul terminale due client affiancati (Alice e Bob) mostrando passo dopo passo in due colonne parallele l'interazione in tempo reale, i messaggi di server, i controlli di sicurezza e l'abbandono.
+
+### 4. Analisi con Sanitizer GCC (TSan e ASan)
+Per un controllo approfondito a livello di memoria e thread:
+```bash
+# ThreadSanitizer (rilevamento data races tra thread):
+make tsan
+
+# AddressSanitizer & UndefinedBehaviorSanitizer (buffer overflow e memory leak):
+make asan
 ```
 
 ---
@@ -152,29 +174,17 @@ Nella cartella `test/` è disponibile lo script interattivo `simulate_game.py` c
 - **Vittoria Verticale**
 - **Diagonale Discendente (`\`)**
 - **Diagonale Ascendente (`/`)**
-- **Partita Patta / Pareggio (42 mosse)**
+- **Partita Patta / Pareggio (42 mosse)** e gestione completa della negoziazione di rivincita (errore di sintassi, voto favorevole e rifiuto).
 
-### 1. Dimostrazione Visiva su 3 Terminali Separati
-Lanciando semplicemente:
-
-```bash
-python test/simulate_game.py
-```
-
-Lo script apre automaticamente **3 finestre di terminale** distinte (Server, Giocatore 1 Giallo, Giocatore 2 Rosso), connette i client, crea la stanza e riproduce la partita mossa dopo mossa con ritardo visivo, mostrando la caduta delle pedine e l'esito finale.
-
-È anche possibile passare direttamente la casistica desiderata da riga di comando:
-```bash
-python test/simulate_game.py orizzontale
-python test/simulate_game.py verticale
-python test/simulate_game.py diag_down
-python test/simulate_game.py diag_up
-python test/simulate_game.py pareggio
-```
-
-### 2. Esecuzione Automatica di Tutte le Casistiche (Headless)
-Per validare tutte e 5 le casistiche contemporaneamente in modalità batch:
+### Esecuzione Automatica con Rendering delle Scacchiere
+Per visualizzare le scacchiere e validare tutte le casistiche in sequenza:
 
 ```bash
 python test/simulate_game.py --test-all
 ```
+
+### Dimostrazione Interattiva su 3 Terminali Separati
+```bash
+python test/simulate_game.py
+```
+Lo script apre automaticamente **3 finestre di terminale** distinte (Server, Giocatore 1 Giallo, Giocatore 2 Rosso), connette i client, crea la stanza e riproduce la partita mossa dopo mossa con ritardo visivo, mostrando la caduta delle pedine e l'esito finale.
